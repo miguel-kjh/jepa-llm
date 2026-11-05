@@ -24,8 +24,15 @@ Visión de conjunto de los papers de `papers/`. Los resúmenes detallados están
 - **El baseline de LLM-JEPA podría estar poco entrenado.** Con el mismo modelo (Llama-3.2-1B-Instruct) y el mismo dataset (NL-RX-SYNTH), Sengupta obtiene un 88.9 % de exact match sin término JEPA (LoRA r = 32). LLM-JEPA reporta un baseline del 57.3 % con fine-tuning completo y del 50.2 % con LoRA de rango 512. Hay que comprobarlo antes de reproducir sus ganancias.
 - **JEPA solo, frente a JEPA como término auxiliar.** LLM-JEPA y DLLM-JEPA funcionan con un término generativo de anclaje (NTP o difusión); sin él, LLM-JEPA cae al 0 % (γ = 0). El JEPA Paradox muestra un T-JEPA puro que colapsa. La excepción a explicar es data2vec, que hace predicción latente pura en texto y funciona (con targets promediados en varias capas y normalizados). En imagen, I-JEPA también funciona sin término generativo, pero con un contexto muy informativo (85–100 % de la imagen) que reduce la multimodalidad del target, justo lo que el JEPA Paradox señala como causa del collapse.
 - **Por qué predecir en latente y no reconstruir.** Balestriero & LeCun dan el argumento formal en imagen: con MSE en píxeles la reconstrucción prioriza las direcciones de alta varianza, no las discriminativas. Su análisis depende del espectro de píxeles, así que no cubre la cross-entropy sobre tokens; en texto falta demostrar que MLM/NTP sufre el mismo desajuste, que es justo la premisa de añadir un término JEPA.
-- **El collapse es el riesgo central.** LLM-JEPA y BERT-JEPA no tienen EMA ni stop-gradient; DLLM-JEPA, data2vec, I-JEPA y JEPA4Rec sí usan teacher EMA, pero ninguno demuestra con una ablation que el EMA sea lo que evita el collapse. Ningún paper prueba SIGReg en serio en texto: el JEPA Paradox lo deja como predicción y Sengupta lo usa solo como auxiliar.
+- **El baseline de LLM-JEPA, confirmado como débil.** En nuestro experimento (2026-11-05), Llama-3.2-1B-Instruct con LoRA r = 32 llega al 86.80 % en NL-RX-Synth sin término JEPA, frente al 57.29 % del paper.
+- **El collapse es el riesgo central.** LLM-JEPA y BERT-JEPA no tienen EMA ni stop-gradient; DLLM-JEPA, data2vec, I-JEPA y JEPA4Rec sí usan teacher EMA, pero ninguno demuestra con una ablation que el EMA sea lo que evita el collapse. Ningún paper prueba SIGReg en serio en texto: el JEPA Paradox lo deja como predicción y Sengupta lo usa solo como auxiliar. En nuestra réplica de LLM-JEPA el collapse aparece en menos de 250 pasos: el embedding del último token (`<|eot_id|>`) se vuelve el mismo para todos los ejemplos.
 - **Rigor estadístico desigual.** Solo Sengupta corrige por comparaciones múltiples. LLM-JEPA y DLLM-JEPA eligen el mejor (λ, k) de un grid que el baseline no tiene. BERT-JEPA, JEPA4Rec y Rabtriever no reportan varianza.
+
+## Experimentos
+
+| Fecha | Experimento | Resultado |
+|---|---|---|
+| 2026-11-05 | [LLM-JEPA en NL-RX-Synth (Llama-3.2-1B, LoRA)](experiments/2026-11-05-llm-jepa-nl-rx-synth.md) | 87.40 % frente a 86.80 % del baseline (p = 0.26, una ejecución). El término JEPA colapsa: coseno de 0.9999 entre embeddings de ejemplos distintos. |
 
 ## Ideas para el proyecto
 

@@ -7,7 +7,12 @@ authors = [
     { name = "miguel-kjh", email = "miguelangel.kjh@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "accelerate>=1.15.0",
+    "peft>=0.21.2",
+    "torch==2.14.1",
+    "transformers>=5.22.1",
+]
 
 [project.scripts]
 jepa-llm = "jepa_llm:main"
@@ -15,3 +20,22 @@ jepa-llm = "jepa_llm:main"
 [build-system]
 requires = ["uv_build>=0.13.1,<0.14.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.4.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.11.2",
+    "nbconvert>=7.17.2",
+    "nbformat>=5.11.1",
+]
+
+# The default PyPI torch wheel (CUDA 13.2 runtime) segfaults in cudaGetDeviceCount
+# under WSL2, so torch is pinned to the CUDA 12.6 build from the PyTorch index.
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
