@@ -37,6 +37,7 @@ class NLRXConfig:
     max_grad_norm: float = 1.0
     log_every: int = 25
     val_every: int = 250
+    diag_examples: int = 300  # first N val examples used for the collapse metrics
 
     # LLM-JEPA (fixed in advance, no grid search)
     jepa_k: int = 1

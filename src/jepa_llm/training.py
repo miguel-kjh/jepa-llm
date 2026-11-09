@@ -8,8 +8,11 @@ import torch
 from transformers import get_linear_schedule_with_warmup
 
 from .config import NLRXConfig
+from .diagnostics import collapse_metrics, view_embeddings
 from .model import build_model, compute_losses
 from .tokenization import NLRXTokenizer
+
+DIAG_KEYS = ("cos_pair", "cos_between", "erank_code", "erank_text", "cos_pair_centered", "top1_centered")
 
 
 @torch.no_grad()
@@ -51,6 +54,8 @@ def train(
     sched = get_linear_schedule_with_warmup(opt, int(cfg.warmup_ratio * total_steps), total_steps)
     rng = random.Random(cfg.seed)
     hist = {"step": [], "ntp": [], "dist": [], "val_step": [], "val_ntp": [], "val_dist": []}
+    if val_data is not None:
+        hist.update({f"val_{m}": [] for m in DIAG_KEYS})
     step, t0 = 0, time.time()
     run_ntp, run_dist, run_n = 0.0, 0.0, 0
     while step < total_steps:
@@ -77,6 +82,9 @@ def train(
                 hist["val_step"].append(step)
                 hist["val_ntp"].append(v_ntp)
                 hist["val_dist"].append(v_dist)
+                diag = collapse_metrics(*view_embeddings(model, val_data[: cfg.diag_examples], tok, k))
+                for m in DIAG_KEYS:
+                    hist[f"val_{m}"].append(diag[m])
                 print(
                     f"[{tag}] step {step}/{total_steps}  train ntp {hist['ntp'][-1]:.4f}  "
                     f"train dist {hist['dist'][-1]:.4f}  val ntp {v_ntp:.4f}  val dist {v_dist:.4f}  "

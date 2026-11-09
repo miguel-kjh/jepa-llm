@@ -14,6 +14,7 @@ The first experiment, LLM-JEPA vs. plain LoRA fine-tuning on NL-RX-Synth (Llama-
 - `batching.py`: NTP batches and packed JEPA batches with a block-causal 4D mask.
 - `model.py`: the LoRA model and the losses.
 - `training.py`, `evaluation.py`, `experiment.py`: the training loop, exact-match evaluation, and run orchestration plus saved artifacts.
+- `diagnostics.py`: collapse metrics: same-pair cosine, cosine between different examples, effective rank, and the centred same-pair cosine and Text→Code top-1, which show whether any pair signal is left once the shared direction is removed. They are logged at every validation step and computed on saved adapters with `uv run jepa-llm nlrx-diagnose`.
 
 `notebooks/llm_jepa_nlrx.ipynb` only drives the package. Its saved outputs are from the original run, and the write-up is in `wiki/experiments/`.
 
