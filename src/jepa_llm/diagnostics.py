@@ -1,16 +1,16 @@
-"""Collapse diagnostics for the JEPA embeddings (Pred = last [PRED] token of Text, Code = last Code token)."""
+"""Collapse diagnostics for the JEPA embeddings, read through `model.pool` exactly like the loss."""
 
 import torch
 import torch.nn.functional as F
 
 from .batching import jepa_batch
-from .model import backbone_of, packed_hidden_states
+from .model import backbone_of, packed_hidden_states, pool
 from .tokenization import NLRXTokenizer
 
 
 @torch.no_grad()
 def view_embeddings(
-    model, examples: list[dict], tok: NLRXTokenizer, k: int, bs: int = 32
+    model, examples: list[dict], tok: NLRXTokenizer, k: int, bs: int = 32, pooling: str = "last"
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """(N, d) float32 CPU tensors with the Pred and Code vectors, read exactly where `jepa_distance` reads them."""
     was_training = model.training
@@ -18,10 +18,9 @@ def view_embeddings(
     preds, codes = [], []
     for i in range(0, len(examples), bs):
         jb = jepa_batch(examples[i : i + bs], k, tok.pred_ids, tok.pad_id)
-        h = packed_hidden_states(backbone_of(model), jb)
-        rows = torch.arange(h.shape[0], device=h.device)
-        preds.append(h[rows, jb["pred_idx"].to(h.device)].float().cpu())
-        codes.append(h[rows, jb["code_idx"].to(h.device)].float().cpu())
+        pred, code = pool(packed_hidden_states(backbone_of(model), jb), jb, pooling)
+        preds.append(pred.cpu())
+        codes.append(code.cpu())
     model.train(was_training)
     return torch.cat(preds), torch.cat(codes)
 

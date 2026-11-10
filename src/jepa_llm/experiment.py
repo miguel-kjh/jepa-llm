@@ -3,6 +3,7 @@
 Artifacts under `cfg.out_dir` (same layout as the original notebook):
     split.json, results.json, curves.png,
     <tag>/adapter/, <tag>/history.json, <tag>/test_predictions.jsonl, <tag>/collapse.json
+    screen/<tag>/history.json  (short screening runs: no adapter, no test predictions)
 """
 
 import gc
@@ -65,6 +66,24 @@ def run_and_evaluate(cfg: NLRXConfig, tok: NLRXTokenizer, data: NLRXData, tag: s
     return {"tag": tag, "lambda": lam, "k": k, "test_exact_match": acc, "hist": hist}
 
 
+def screen(cfg: NLRXConfig, tok: NLRXTokenizer, data: NLRXData, tag: str, lam: float, steps: int) -> dict:
+    """Short run for screening: the first `steps` steps of the full run (same LR schedule and data order).
+
+    Only `out_dir/screen/<tag>/history.json` is written; `baseline/` and `llm_jepa/` are never touched.
+    """
+    model, hist = train(cfg, tok, tag, lam=lam, k=cfg.jepa_k, data=data.train, val_data=data.val, stop_step=steps)
+    hist["run"] = {"tag": tag, "lambda": lam, "k": cfg.jepa_k, "pooling": cfg.jepa_pooling, "steps": steps,
+                   "val_every": cfg.val_every, "seed": cfg.seed}
+    run_dir = cfg.out_dir / "screen" / tag
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "history.json").write_text(json.dumps(hist))
+    last = {m: hist[f"val_{m}"][-1] for m in ("ntp", "cos_between", "top1_centered", "cos_pair_centered")}
+    print(f"[{tag}] step {hist['val_step'][-1]}: " + "  ".join(f"{m} {v:.4f}" for m, v in last.items()), flush=True)
+    del model
+    free_cuda_memory()
+    return hist
+
+
 def write_results(cfg: NLRXConfig, results: list[dict], n_test: int) -> list[dict]:
     """Save `results.json` (without the histories) and print a Markdown table."""
     summary = [{key: r[key] for key in ("tag", "lambda", "k", "test_exact_match")} for r in results]
@@ -111,8 +130,8 @@ def diagnose(cfg: NLRXConfig, tok: NLRXTokenizer, data: NLRXData, tag: str, save
     base = AutoModelForCausalLM.from_pretrained(cfg.model_name, dtype=cfg.dtype).to(cfg.device)
     model = PeftModel.from_pretrained(base, cfg.out_dir / tag / "adapter").eval()
     examples = data.val[: cfg.diag_examples]
-    metrics = collapse_metrics(*view_embeddings(model, examples, tok, cfg.jepa_k))
-    report = {"tag": tag, "k": cfg.jepa_k, "split": "val", "n_examples": len(examples), **metrics}
+    metrics = collapse_metrics(*view_embeddings(model, examples, tok, cfg.jepa_k, pooling=cfg.jepa_pooling))
+    report = {"tag": tag, "k": cfg.jepa_k, "pooling": cfg.jepa_pooling, "split": "val", "n_examples": len(examples), **metrics}
     if save:
         (cfg.out_dir / tag / "collapse.json").write_text(json.dumps(report, indent=2))
     del model, base

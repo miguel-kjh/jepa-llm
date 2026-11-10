@@ -121,19 +121,21 @@ def test_plot_curves_with_saved_history(tmp_path):
 
 @pytest.mark.gpu
 @requires_gpu_model
-def test_pair_cosine_matches_jepa_distance(llama_tok, sample_examples, free_gpu):
+@pytest.mark.parametrize("pooling", ["last", "mean"])
+def test_pair_cosine_matches_jepa_distance(llama_tok, sample_examples, free_gpu, pooling):
     from jepa_llm.model import build_model, jepa_distance
 
     cfg = NLRXConfig()
     model = build_model(cfg).eval()
     with torch.no_grad():
-        dist = jepa_distance(model, jepa_batch(sample_examples, cfg.jepa_k, llama_tok.pred_ids, llama_tok.pad_id))
+        jb = jepa_batch(sample_examples, cfg.jepa_k, llama_tok.pred_ids, llama_tok.pad_id)
+        dist = jepa_distance(model, jb, pooling)
     # Same batch as the loss: identical padding, so identical bf16 numerics -> tight tolerance.
-    pred, code = view_embeddings(model, sample_examples, llama_tok, cfg.jepa_k, bs=len(sample_examples))
+    pred, code = view_embeddings(model, sample_examples, llama_tok, cfg.jepa_k, bs=len(sample_examples), pooling=pooling)
     assert pred.shape == code.shape == (len(sample_examples), model.config.hidden_size)
     assert 1 - collapse_metrics(pred, code)["cos_pair"] == pytest.approx(dist.item(), abs=1e-5)
     # Chunked: padding length changes, so bf16 rounding differs slightly, but the vectors are the same.
-    pred3, code3 = view_embeddings(model, sample_examples, llama_tok, cfg.jepa_k, bs=3)
+    pred3, code3 = view_embeddings(model, sample_examples, llama_tok, cfg.jepa_k, bs=3, pooling=pooling)
     assert collapse_metrics(pred3, code3)["cos_pair"] == pytest.approx(1 - dist.item(), abs=1e-2)
     assert not model.training, "view_embeddings must restore the previous mode"
     del model

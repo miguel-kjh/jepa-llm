@@ -42,6 +42,9 @@ class NLRXConfig:
     # LLM-JEPA (fixed in advance, no grid search)
     jepa_k: int = 1
     jepa_lambda: float = 1.0
+    # How each view becomes one vector: "last" = last [PRED] / last Code token (original LLM-JEPA);
+    # "mean" = mean over the content tokens (description + [PRED]s for Text, regex for Code).
+    jepa_pooling: str = "last"
 
     # Evaluation
     eval_batch_size: int = 64

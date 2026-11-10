@@ -16,12 +16,14 @@ DIAG_KEYS = ("cos_pair", "cos_between", "erank_code", "erank_text", "cos_pair_ce
 
 
 @torch.no_grad()
-def evaluate_losses(model, data: list[dict], k: int, tok: NLRXTokenizer, bs: int = 32) -> tuple[float, float]:
+def evaluate_losses(
+    model, data: list[dict], k: int, tok: NLRXTokenizer, bs: int = 32, pooling: str = "last"
+) -> tuple[float, float]:
     """Mean NTP loss and mean JEPA distance over `data` (the distance is measured, never optimised)."""
     model.eval()
     ntps, dists = [], []
     for i in range(0, len(data), bs):
-        _, ntp, dist = compute_losses(model, data[i : i + bs], lam=0.0, k=k, tok=tok)
+        _, ntp, dist = compute_losses(model, data[i : i + bs], lam=0.0, k=k, tok=tok, pooling=pooling)
         ntps.append(ntp.item())
         dists.append(dist.item())
     model.train()
@@ -40,7 +42,14 @@ def train(
     max_steps: int | None = None,
     val_data: list[dict] | None = None,
     log_every: int | None = None,
+    stop_step: int | None = None,
 ):
+    """Train one LoRA run. The JEPA views are pooled with `cfg.jepa_pooling`.
+
+    `max_steps` sets the length of the LR schedule; `stop_step` ends training earlier without changing the
+    schedule, so a short screening run is exactly the first `stop_step` steps of the full run.
+    """
+    pooling = cfg.jepa_pooling
     epochs = cfg.epochs if epochs is None else epochs
     lr = cfg.lr if lr is None else lr
     log_every = cfg.log_every if log_every is None else log_every
@@ -51,6 +60,7 @@ def train(
     opt = torch.optim.AdamW(params, lr=lr, weight_decay=0.0)
     steps_per_epoch = math.ceil(len(data) / (cfg.batch_size * cfg.grad_accum))
     total_steps = max_steps or steps_per_epoch * epochs
+    last_step = total_steps if stop_step is None else min(stop_step, total_steps)
     sched = get_linear_schedule_with_warmup(opt, int(cfg.warmup_ratio * total_steps), total_steps)
     rng = random.Random(cfg.seed)
     hist = {"step": [], "ntp": [], "dist": [], "val_step": [], "val_ntp": [], "val_dist": []}
@@ -58,13 +68,13 @@ def train(
         hist.update({f"val_{m}": [] for m in DIAG_KEYS})
     step, t0 = 0, time.time()
     run_ntp, run_dist, run_n = 0.0, 0.0, 0
-    while step < total_steps:
+    while step < last_step:
         order = list(range(len(data)))
         rng.shuffle(order)
         micro = [order[i : i + cfg.batch_size] for i in range(0, len(order), cfg.batch_size)]
         for j in range(0, len(micro), cfg.grad_accum):
             for mb in micro[j : j + cfg.grad_accum]:
-                total, ntp, dist = compute_losses(model, [data[i] for i in mb], lam, k, tok)
+                total, ntp, dist = compute_losses(model, [data[i] for i in mb], lam, k, tok, pooling)
                 (total / cfg.grad_accum).backward()
                 run_ntp, run_dist, run_n = run_ntp + ntp.item(), run_dist + dist.item(), run_n + 1
             torch.nn.utils.clip_grad_norm_(params, cfg.max_grad_norm)
@@ -72,24 +82,25 @@ def train(
             sched.step()
             opt.zero_grad(set_to_none=True)
             step += 1
-            if step % log_every == 0 or step == total_steps:
+            if step % log_every == 0 or step == last_step:
                 hist["step"].append(step)
                 hist["ntp"].append(run_ntp / run_n)
                 hist["dist"].append(run_dist / run_n)
                 run_ntp, run_dist, run_n = 0.0, 0.0, 0
-            if val_data is not None and (step % cfg.val_every == 0 or step == total_steps):
-                v_ntp, v_dist = evaluate_losses(model, val_data, k, tok)
+            if val_data is not None and (step % cfg.val_every == 0 or step == last_step):
+                v_ntp, v_dist = evaluate_losses(model, val_data, k, tok, pooling=pooling)
                 hist["val_step"].append(step)
                 hist["val_ntp"].append(v_ntp)
                 hist["val_dist"].append(v_dist)
-                diag = collapse_metrics(*view_embeddings(model, val_data[: cfg.diag_examples], tok, k))
+                diag = collapse_metrics(*view_embeddings(model, val_data[: cfg.diag_examples], tok, k, pooling=pooling))
                 for m in DIAG_KEYS:
                     hist[f"val_{m}"].append(diag[m])
                 print(
                     f"[{tag}] step {step}/{total_steps}  train ntp {hist['ntp'][-1]:.4f}  "
                     f"train dist {hist['dist'][-1]:.4f}  val ntp {v_ntp:.4f}  val dist {v_dist:.4f}  "
-                    f"({time.time() - t0:.0f}s)"
+                    f"({time.time() - t0:.0f}s)",
+                    flush=True,  # visible live when stdout is redirected to a log file
                 )
-            if step >= total_steps:
+            if step >= last_step:
                 break
     return model, hist

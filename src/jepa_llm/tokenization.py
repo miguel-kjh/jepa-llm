@@ -32,15 +32,32 @@ class NLRXTokenizer:
         )
         return self.tok(text, add_special_tokens=False).input_ids
 
+    def content_span(self, view: list[int], content: str) -> tuple[int, int]:
+        """[start, end) of `content` inside a one-message chat view: the tokens right before the final <|eot_id|>.
+
+        Headers, the system prompt with the date and <|eot_id|> are outside the span. The assertion catches
+        any tokenizer merge across the header/content boundary.
+        """
+        content_ids = self.tok(content, add_special_tokens=False).input_ids
+        end = len(view) - 1
+        start = end - len(content_ids)
+        assert view[end] == self.eot_id, "a chat view must end with <|eot_id|>"
+        assert start > 0 and view[start:end] == content_ids, f"content tokens not found in the chat view: {content!r}"
+        return start, end
+
     def encode(self, desc: str, regex: str) -> dict:
         prompt = self.chat_ids([{"role": "user", "content": desc}], add_generation_prompt=True)
         answer = self.tok(regex, add_special_tokens=False).input_ids + [self.eot_id]
+        text_view = self.chat_ids([{"role": "user", "content": desc}])
+        code_view = self.chat_ids([{"role": "assistant", "content": regex}])
         return {
             "prompt": prompt,                                   # used for generation
             "ntp_ids": prompt + answer,                         # NTP forward
             "ntp_labels": [-100] * len(prompt) + answer,        # loss only on the regex
-            "text_view": self.chat_ids([{"role": "user", "content": desc}]),        # Text view (Enc input)
-            "code_view": self.chat_ids([{"role": "assistant", "content": regex}]),  # Code view (target)
+            "text_view": text_view,                             # Text view (Enc input)
+            "code_view": code_view,                             # Code view (target)
+            "text_content": self.content_span(text_view, desc),  # description tokens, for mean pooling
+            "code_content": self.content_span(code_view, regex),  # regex tokens, for mean pooling
             "answer_len": len(answer),
             "desc": desc,
             "regex": regex,

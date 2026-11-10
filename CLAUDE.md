@@ -12,7 +12,7 @@ The first experiment, LLM-JEPA vs. plain LoRA fine-tuning on NL-RX-Synth (Llama-
 - `data.py`: loads the pairs and the fixed split (`outputs/llm_jepa_nlrx/split.json` is reused if present).
 - `tokenization.py`: `NLRXTokenizer`, which builds the NTP example, the Text/Code views and the `[PRED]` ids.
 - `batching.py`: NTP batches and packed JEPA batches with a block-causal 4D mask.
-- `model.py`: the LoRA model and the losses.
+- `model.py`: the LoRA model and the losses. `pool` turns each view into one vector (`jepa_pooling`: `"last"` token, or `"mean"` over the content tokens, i.e. the description plus `[PRED]`s and the regex) and is shared by the loss and the diagnostics.
 - `training.py`, `evaluation.py`, `experiment.py`: the training loop, exact-match evaluation, and run orchestration plus saved artifacts.
 - `diagnostics.py`: collapse metrics: same-pair cosine, cosine between different examples, effective rank, and the centred same-pair cosine and Text→Code top-1, which show whether any pair signal is left once the shared direction is removed. They are logged at every validation step and computed on saved adapters with `uv run jepa-llm nlrx-diagnose`.
 
@@ -23,6 +23,7 @@ The first experiment, LLM-JEPA vs. plain LoRA fine-tuning on NL-RX-Synth (Llama-
 - Python 3.12 (`.python-version`), managed with **uv** (`uv_build` backend, `src/` layout, package `jepa_llm`).
 - `uv sync` — create/update the virtualenv
 - `uv run jepa-llm nlrx --run {baseline,llm_jepa,all}`: train and evaluate the NL-RX experiment. This overwrites `outputs/llm_jepa_nlrx/`, and one run takes about 20 minutes on a 4070.
+- `uv run jepa-llm nlrx-screen --pooling {last,mean} --lam 1 --steps 500 --val-every 100`: a short screening run, the first N steps of the full run with the same schedule. It writes only `outputs/llm_jepa_nlrx/screen/<tag>/history.json` (default tag `lam<λ>_<pooling>`).
 - `uv run pytest`: run the tests. Tests marked `gpu` are skipped when CUDA or the cached Llama model is missing. `-m "not slow"` skips the training smoke test.
 - If `uv add`/`uv remove` breaks `import torch` (`libcudnn.so.9` not found), run `uv sync` with `--reinstall-package` on the `nvidia-*` wheels. Stale cu13 wheels shared the `nvidia/` directory with the cu12 ones.
 - `uv add <pkg>` — add a dependency (updates `pyproject.toml` and `uv.lock`)

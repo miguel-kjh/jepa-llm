@@ -40,26 +40,45 @@ def packed_hidden_states(backbone, jb: dict) -> torch.Tensor:
     ).last_hidden_state
 
 
-def jepa_distance(model, jb: dict) -> torch.Tensor:
+POOLINGS = ("last", "mean")
+
+
+def pool(h: torch.Tensor, jb: dict, pooling: str) -> tuple[torch.Tensor, torch.Tensor]:
+    """(B, d) float32 Pred and Code vectors from the packed hidden states `h` (B, L, d).
+
+    The single place where the loss and the diagnostics read the views, so both see the same vectors.
+    "last": last [PRED] token (last Text token if k = 0) and last Code token.
+    "mean": mean over `text_mask` (description + [PRED]s) and over `code_mask` (regex).
+    """
+    if pooling == "last":
+        rows = torch.arange(h.shape[0], device=h.device)
+        return h[rows, jb["pred_idx"].to(h.device)].float(), h[rows, jb["code_idx"].to(h.device)].float()
+    if pooling == "mean":
+        def masked_mean(mask):
+            m = mask.to(h.device, torch.float32)[..., None]
+            return (h.float() * m).sum(dim=1) / m.sum(dim=1)
+        return masked_mean(jb["text_mask"]), masked_mean(jb["code_mask"])
+    raise ValueError(f"unknown pooling {pooling!r}, expected one of {POOLINGS}")
+
+
+def jepa_distance(model, jb: dict, pooling: str = "last") -> torch.Tensor:
     # Same LLM as encoder and predictor; LoRA layers are active inside the backbone.
     h = packed_hidden_states(backbone_of(model), jb)
-    rows = torch.arange(h.shape[0], device=h.device)
-    pred = h[rows, jb["pred_idx"].to(h.device)].float()
-    target = h[rows, jb["code_idx"].to(h.device)].float()  # no stop-gradient, as in LLM-JEPA
+    pred, target = pool(h, jb, pooling)  # no stop-gradient, as in LLM-JEPA
     return (1 - F.cosine_similarity(pred, target, dim=-1)).mean()
 
 
-def compute_losses(model, batch: list[dict], lam: float, k: int, tok: NLRXTokenizer):
+def compute_losses(model, batch: list[dict], lam: float, k: int, tok: NLRXTokenizer, pooling: str = "last"):
     """Returns (total loss, detached NTP loss, detached JEPA distance)."""
     device = backbone_of(model).get_input_embeddings().weight.device
     nb = {key: v.to(device) for key, v in ntp_batch(batch, tok.pad_id).items()}
     ntp = model(**nb, use_cache=False).loss
     jb = jepa_batch(batch, k, tok.pred_ids, tok.pad_id)
     if lam > 0:
-        dist = jepa_distance(model, jb)
+        dist = jepa_distance(model, jb, pooling)
         total = ntp + lam * dist
     else:
         with torch.no_grad():  # baseline: the distance is only logged
-            dist = jepa_distance(model, jb)
+            dist = jepa_distance(model, jb, pooling)
         total = ntp
     return total, ntp.detach(), dist.detach()
